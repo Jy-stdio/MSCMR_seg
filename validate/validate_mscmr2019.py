@@ -1,32 +1,34 @@
 import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 import cv2
 import torch
 import shutil
+from hausdorff import hausdorff_distance
+import sys
+sys.path.append('/home3/HWGroup/zhengyx/JY_file/2_MSCMR_seg/2_MSCMR_seg/Pytorch-medical-image-segmentation')
 import utils.image_transforms as image_transforms
 from torch.utils.data import DataLoader
 import utils.transforms as extended_transforms
 from tqdm import tqdm
 from datasets import mscmr2019 as mscmr2019
 from utils.loss import *
-from hausdorff import hausdorff_distance
+
+model_type = "segnet"
+fold = 5  # 1 2 3 4 5
+augdata = "T2"
+
+if model_type == "unet":
+    from networks.unet import Baseline
+elif model_type == "fcn":
+    from networks.fcn import Baseline
+elif model_type == "segnet":
+    from networks.segnet import Baseline
+elif model_type == "attunet":
+    from networks.attunet import Baseline
 
 
-model_type = "unet"
-
-if model_type == "baseline":
-    if model_type == "unet":
-        from networks.unet import Baseline
-    elif model_type == "fcn":
-        from networks.fcn import Baseline
-    elif model_type == "segnet":
-        from networks.segnet import Baseline
-    elif model_type == "attunet":
-        from networks.attunet import Baseline
-
-fold = 1  # 1 2 3 4 5
-augdata = "C0"
-root_path = '../'
-val_path = os.path.join(root_path, 'media/Datasets/MSCMR2019', augdata, 'npy')
+root_path = '/home3/HWGroup/zhengyx/JY_file/2_MSCMR_seg/2_MSCMR_seg/Pytorch-medical-image-segmentation/'
+val_path = os.path.join(root_path, 'MSCMR2019', augdata, 'npy')
 
 input_transform = extended_transforms.NpyToTensor()
 center_crop = image_transforms.CenterCrop(160)
@@ -42,9 +44,18 @@ palette = mscmr2019.palette
 custom_palette = mscmr2019.custom_palette
 num_classes = mscmr2019.num_classes
 
+chks = os.listdir(os.path.join(root_path, "checkpoint"))
+for i in chks:
+    if "{}_fold{}_dice_{}".format(model_type, fold, augdata) in i:
+        chk = i
+        break
+
 net = Baseline(num_classes=num_classes).cuda()
-net.load_state_dict(torch.load("../checkpoint/attunet_fold{}_dice_{}_722426.pth".format(fold, augdata)))
+# net.load_state_dict(torch.load(os.path.join(root_path, "checkpoint/{}_fold{}_dice_{}_716594.pth".format(model_type, fold, augdata))))
+net.load_state_dict(torch.load(os.path.join(root_path, f"checkpoint/{chk}")))
 net.eval()
+
+
 
 
 def auto_val(net):
@@ -53,7 +64,7 @@ def auto_val(net):
     class_jaccards = np.array([0] * (num_classes - 1), dtype=np.float)
     class_hsdfs = np.array([0] * (num_classes - 1), dtype=np.float)
 
-    save_path = './results'
+    save_path = f'./results/{model_type}_fold{fold}_dice_{augdata}'
     if os.path.exists(save_path):
         # 若该目录已存在，则先删除，用来清空数据
         shutil.rmtree(os.path.join(save_path))
@@ -65,14 +76,32 @@ def auto_val(net):
     os.makedirs(pred_path)
     os.makedirs(color_pred_path)
     os.makedirs(gt_path)
+    
+    import logging
+    import datetime
+    log_file = os.path.join(save_path,'logging.log')
+    
+    logging.basicConfig(level=logging.INFO,
+            # format='%(asctime)s %(levelname)s %(message)s',
+            format='',
+            datefmt='%Y-%m-%d %H:%M:%S',
+            filename=log_file,
+            filemode='a')
+
+    logger = logging.getLogger()
+    console = logging.StreamHandler()
+    logger.addHandler(console)
+    logger.info(f'----{datetime.datetime.now()}----')
 
     # 存放每个切片的指标数组
     val_dice_arr = []
     val_jaccard_arr = []
     val_hsdf_arr = []
-    for slice, (input, mask, mask_copy, file_name) in tqdm(enumerate(val_loader, 1)):
-        file_name = file_name[0].split('.')[0]
+    for slice, (input, mask, file_name) in tqdm(enumerate(val_loader, 1)):
+        file_name = file_name[0].split('/')[-1].split('.')[0]
 
+        # print(file_name)
+        # break
         X = input.cuda()
         pred = net(X)
         pred = torch.sigmoid(pred)
@@ -97,6 +126,7 @@ def auto_val(net):
 
         # 保存预测结果
         # png格式
+        # print(os.path.join(img_path, file_name + '.png'))
         m1.save(os.path.join(img_path, file_name + '.png'))
         gt.save(os.path.join(gt_path, file_name + '.png'))
         save_pred_png.save(os.path.join(pred_path, file_name + '.png'))
@@ -151,18 +181,18 @@ def auto_val(net):
     hsdf_slice_std_lv = np.std(hsdf_slice_arr[:, 1:2].squeeze())
     hsdf_slice_std_rv = np.std(hsdf_slice_arr[:, 2:3].squeeze())
 
-
-    print('mean_dice: {:.3}±{:.3} - dice_lvm: {:.3}±{:.3} - dice_lv: {:.3}±{:.3} - dice_rv: {:.3}±{:.3}'
+    logger.info(f"model_type = {model_type }, fold = {fold}, augdata={augdata}")
+    logger.info('mean_dice: {:.3}±{:.3} - dice_lvm: {:.3}±{:.3} - dice_lv: {:.3}±{:.3} - dice_rv: {:.3}±{:.3}'
           .format(dice_mean, dice_slice_mean_std,
                   dice_slice_class_mean_arr[0], dice_slice_std_lvm,
                   dice_slice_class_mean_arr[1], dice_slice_std_lv,
                   dice_slice_class_mean_arr[2], dice_slice_std_rv))
-    print('mean_jaccard: {:.3}±{:.3} - jaccard_lvm: {:.3}±{:.3} - jaccard_lv: {:.3}±{:.3} - jaccard_rv: {:.3}±{:.3}'
+    logger.info('mean_jaccard: {:.3}±{:.3} - jaccard_lvm: {:.3}±{:.3} - jaccard_lv: {:.3}±{:.3} - jaccard_rv: {:.3}±{:.3}'
           .format(jaccard_mean, jaccard_slice_mean_std,
                   jaccard_slice_class_mean_arr[0], jaccard_slice_std_lvm,
                   jaccard_slice_class_mean_arr[1], jaccard_slice_std_lv,
                   jaccard_slice_class_mean_arr[2], jaccard_slice_std_rv))
-    print('mean_hsdf: {:.3}±{:.3} - hsdf_lvm: {:.3}±{:.3} - hsdf_lv: {:.3}±{:.3} - hsdf_rv: {:.3}±{:.3}'
+    logger.info('mean_hsdf: {:.3}±{:.3} - hsdf_lvm: {:.3}±{:.3} - hsdf_lv: {:.3}±{:.3} - hsdf_rv: {:.3}±{:.3}'
           .format(hsdf_mean, hsdf_slice_mean_std,
                   hsdf_slice_class_mean_arr[0], hsdf_slice_std_lvm,
                   hsdf_slice_class_mean_arr[1], hsdf_slice_std_lv,

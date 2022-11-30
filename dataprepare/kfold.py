@@ -61,6 +61,7 @@ def train_val(file_name_path, file_path, save_path):
         print('ok!')
 
 if __name__ == '__main__':
+    # 2
     types = ['C0', 'DE', 'T2']
     dataset_kfold(os.path.join('/home3/HWGroup/zhengyx/JY_file/2_MSCMR_seg/2_MSCMR_seg/Pytorch-medical-image-segmentation/MSCMR2019', types[1], 'npy/Labels'),
                   os.path.join('/home3/HWGroup/zhengyx/JY_file/2_MSCMR_seg/2_MSCMR_seg/Pytorch-medical-image-segmentation/MSCMR2019', types[1], 'npy'))
