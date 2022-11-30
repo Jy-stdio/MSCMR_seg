@@ -1,0 +1,5 @@
+.idea
+checkpoint
+log
+train/train_*.py
+media/
